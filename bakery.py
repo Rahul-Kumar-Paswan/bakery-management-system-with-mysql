@@ -1,20 +1,22 @@
 import pandas as pd
 import datetime  
 import mysql.connector
+from prettytable import PrettyTable
+
 
 db = mysql.connector.connect (
     host = 'localhost',
-    user = 'rahul',
+    user = 'root',
     password  = 'Rahul@123',
-    database = 'my_db'
+    database = 'my_db',
+    port = '3307'
 )
 cursor = db.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS bakery_orders (
     order_id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_name VARCHAR(255),
-    total_amount INT
+    customer_name VARCHAR(255)
 )
 """)
 
@@ -34,13 +36,27 @@ CREATE TABLE IF NOT EXISTS cust_bill (
 db.commit()
 
 def add_order_to_database(order_id, customer_name, cake, quantity, cost_per_cake, total_cost, order_date):
-    sql = """
-    INSERT INTO cust_bill (order_id, customer_name, cake, quantity, cost_per_cake, sum_of_each_cake, order_date)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """
-    values = (order_id, customer_name, cake, quantity, cost_per_cake, total_cost, order_date)
-    cursor.execute(sql, values)
+    # Check if the cake already exists in the order
+    cursor.execute("SELECT * FROM cust_bill WHERE order_id = %s AND cake = %s", (order_id, cake))
+    existing_cake = cursor.fetchone()
+
+    if existing_cake:
+        # Cake already exists, update the quantity and total cost
+        new_quantity = existing_cake[3] + quantity
+        new_total_cost = existing_cake[5] + total_cost
+        cursor.execute("UPDATE cust_bill SET quantity = %s, sum_of_each_cake = %s WHERE order_id = %s AND cake = %s",
+                       (new_quantity, new_total_cost, order_id, cake))
+    else:
+        # Cake does not exist, create a new entry
+        sql = """
+        INSERT INTO cust_bill (order_id, customer_name, cake, quantity, cost_per_cake, sum_of_each_cake, order_date)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        values = (order_id, customer_name, cake, quantity, cost_per_cake, total_cost, order_date)
+        cursor.execute(sql, values)
+
     db.commit()
+
 
 
 def get_order_by_id():
@@ -51,9 +67,28 @@ def get_order_by_id():
     orders = cursor.fetchall()
 
     if orders:
-        print("Order found:")
+        # Define the table headers
+        table = PrettyTable(["order_id", "customer_name", "cake", "quantity", "cost_per_cake", "sum_of_each_cake", "order_date"])
+
+        # Add the order details to the table
         for order in orders:
-            print(order)
+            table.add_row(order)
+
+        # Set the alignment of each column
+        table.align["order_id"] = "r"
+        table.align["customer_name"] = "l"
+        table.align["cake"] = "l"
+        table.align["quantity"] = "r"
+        table.align["cost_per_cake"] = "r"
+        table.align["sum_of_each_cake"] = "r"
+        table.align["order_date"] = "l"
+
+        cursor.execute("SELECT SUM(sum_of_each_cake) FROM cust_bill WHERE order_id = %s GROUP BY order_id", (order_id,))
+        total_amount = cursor.fetchone()
+
+        # Print the table
+        print(table)
+        print(f"{' ' * 62}Total Amount: {total_amount[0]}")
     else:
         print(f"Order with ID {order_id} not found.")
 
@@ -63,13 +98,34 @@ def view_orders_from_database():
     cursor.execute("SELECT * FROM cust_bill")
     cust_bill = cursor.fetchall()
 
+    if not cust_bill:
+        print("No orders found.")
+        return
+
+    # Define the table headers
+    table = PrettyTable(["order_id", "customer_name", "cake", "quantity", "cost_per_cake", "sum_of_each_cake", "order_date"])
+
+    # Add rows to the table
     for order in cust_bill:
-        print(order)
+        table.add_row(order)
+
+    # Set the alignment of each column
+    table.align["order_id"] = "r"
+    table.align["customer_name"] = "l"
+    table.align["cake"] = "l"
+    table.align["quantity"] = "r"
+    table.align["cost_per_cake"] = "r"
+    table.align["sum_of_each_cake"] = "r"
+    table.align["order_date"] = "l"
+
+    # Print the table
+    print(table)
 
 
-def update_order_in_database(order_id, new_quantity, new_total_cost):
-    cursor.execute("UPDATE cust_bill SET quantity = %s, total_cost = %s WHERE order_id = %s",
-                   (new_quantity, new_total_cost, order_id))
+
+def update_order_in_database(order_id, new_cake, new_quantity, new_total_cost):
+    cursor.execute("UPDATE cust_bill SET quantity = %s, sum_of_each_cake = %s WHERE order_id = %s AND cake = %s",
+                   (new_quantity, new_total_cost, order_id, new_cake))
     db.commit()
 
 
@@ -90,32 +146,64 @@ def cancel_order_in_database():
         print(f"Order with ID {order_id} not found. No changes made.")
 
 
+def remove_item_from_database(orderid,new_cake):
+    cursor.fetchall()
+    cursor.execute("SELECT * FROM cust_bill WHERE order_id = %s AND cake = %s", (orderid, new_cake))
+    existing_cake = cursor.fetchall()
 
+    if existing_cake:
+        cursor.execute("DELETE FROM cust_bill WHERE order_id = %s AND cake = %s", (orderid, new_cake))
+        db.commit()
+        print("Updating .................")
+    else:
+        print(f"{new_cake} not found. No changes made.")
+
+
+def add_cake_to_order(orderid, new_cake):
+    quantity = int(input(f"Enter the quantity for {new_cake}: "))
+    current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Assuming 'menu' is a dictionary containing the menu items and their costs
+    cost_per_cake = menu.get(new_cake, 0)
+    
+    if cost_per_cake == 0:
+        print(f"{new_cake} not found in the menu. Please enter a valid cake.")
+        return
+
+    # Fetch the customer name before executing another query
+    cursor.execute("SELECT customer_name FROM cust_bill WHERE order_id = %s", (orderid,))
+    existing_cus = cursor.fetchone()
+
+    # Fetch and discard the unread result
+    cursor.fetchall()
+
+    if existing_cus:
+        # Fetch the result before executing another query
+        existing_cus = existing_cus[0]
+
+        # Insert the new cake into the cust_bill table
+        sum_of_each_cake = quantity * cost_per_cake
+        add_order_to_database(orderid, existing_cus, new_cake, quantity, cost_per_cake, sum_of_each_cake, current_date)
+        print(f"{new_cake} added successfully!")
+    else:
+        print(f"Customer not found for order ID {orderid}. Please check your order.")
 
 
 
 def add_orders():
     # Insert into bakery_orders table
-    cursor.execute("INSERT INTO bakery_orders (customer_name, total_amount) VALUES (%s, %s)", (cus_name, 0))
+    global cus_name 
+    cus_name = input('ENTER CUSTOMER NAME: ')
+    cursor.execute("INSERT INTO bakery_orders (customer_name) VALUES (%s)", (cus_name,))
     db.commit()
     # Fetch the order_id after insertion
     cursor.execute("SELECT LAST_INSERT_ID()")
     result = cursor.fetchone()
+
     while True:
-        # global cus_name 
-        global cake 
-        # cus_name = input('ENTER CUSTOMER NAME: ')
         cake = list(map(str, input("ENTER WHICH CAKE YOU WANT: ").split()))
         quantity = list(map(int, input("ENTER QUANTITY: ").split()))
         current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # # Insert into bakery_orders table
-        # cursor.execute("INSERT INTO bakery_orders (customer_name, total_amount) VALUES (%s, %s)", (cus_name, 0))
-        # db.commit()
-
-        # Fetch the order_id after insertion
-        # cursor.execute("SELECT LAST_INSERT_ID()")
-        # result = cursor.fetchone()
 
         if result:
             order_id = result[0]
@@ -141,80 +229,65 @@ def add_orders():
             continue
         elif q == 0:
             print('ORDER ADDED SUCCESSFULLY !!!')
-            print(order)
-            print(bill)
             break
         else:
             print("INVALID INPUT")
             break
 
 
-def view_orders():
-    sum=0
-    line='__'
-    space=' '
-    # global current_date
-    current_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"{line*40}")
-    print(f"CUSTOMER NAME : {cus_name} {space:7} ORDERID : {space:13} DATE : {current_date}")
-    print(f"{line*40}")
-    print(f" CAKE {space:5} QUANTITY {space:5} COST_OF_EACH_CAKE {space:5} TOTAL_COST_OF_EACH _CAKE")
-    print(f"{line*40}")
-    for i in bill:
-        sum=sum+bill[i]
-        print(f"| {i:15} {order[i]} {' '*15} {menu[i]} {' '*20} {bill[i]} ")
-
-    print(f"{line*40}")
-    print(f"{' '*45}TOTAL AMOUNT : {sum}")
-    print(f"{line*40}")
-
-
 def update_orders():
+    orderid = int(input("ENTER THE ORDER ID YOU WANT TO UPDATE: "))
 
-    cake_to_update = input("ENTER THE CAKE YOU WANT TO UPDATE :")
+    cursor.execute("SELECT * FROM cust_bill WHERE order_id = %s", (orderid,))
+    existing_order = cursor.fetchall()
 
-    if cake_to_update in order:
-        print(order)
-        print('PRESS 1 TO CHANGE QUANTITY , 2 TO REMOVE ITEM , PRESS 3 TO GO BACK TO PREVIOUS OPTIONS')
-        update_option = int(input('ENTER OPTION :'))
+    if existing_order:
+        print('PRESS 1 TO CHANGE QUANTITY, 2 TO REMOVE CAKE, 3 TO ADD CAKE, PRESS 4 TO GO BACK TO PREVIOUS OPTIONS')
+
+        update_option = int(input('ENTER OPTION: '))
+
         if update_option == 1:
-            new_quantity = int(input(f"Enter the new quantity for {cake_to_update}: "))
-            order[cake_to_update] = new_quantity
-            bill[cake_to_update] = new_quantity * menu[cake_to_update]
+            new_cake = input('ENTER THE CAKE YOU WANT TO UPDATE:')
+            cursor.execute("SELECT * FROM cust_bill WHERE cake = %s AND order_id = %s", (new_cake, orderid))
+            existing_cake = cursor.fetchone()
+            if existing_cake:
+                new_quantity = int(input(f"Enter the new quantity for order ID {orderid}: "))
+                new_total_cost = new_quantity * existing_cake[4]  
+                update_order_in_database(orderid, new_cake, new_quantity, new_total_cost)
+                print(f"Order ID {orderid} updated successfully!")
+            else:
+                print('CAKE NOT FOUND IN THE SPECIFIED ORDER. ENTER CORRECT CAKE')
         elif update_option == 2:
-            order.pop(cake_to_update)
-            bill.pop(cake_to_update)
+            new_cake = input('ENTER THE CAKE YOU WANT TO REMOVE:')
+            cursor.execute("SELECT * FROM cust_bill WHERE cake = %s AND order_id = %s", (new_cake, orderid))
+            existing_cake = cursor.fetchone()
+            if existing_cake:
+                remove_item_from_database(orderid,new_cake)
+                print(f"Order ID {new_cake} removed successfully!")
+            else:
+                print("CAKE NOT FOUND IN THE SPECIFIED ORDER. CAN'T REMOVE SPECIFIED CAKE")
         elif update_option == 3:
+            new_cake = input('ENTER THE CAKE YOU WANT TO ADD:')
+            add_cake_to_order(orderid, new_cake)
+            # print(f"{new_cake} added successfully!")
+        elif update_option == 4:
             return
         else:
             print('INVALID OPTION')
-
-        print(f"{cake_to_update} updated successfully!")
     else:
-        print(f"{cake_to_update} not found in the order. Please add it first.")
-
-
-def cancel_order():
-    confirm_cancellation = int(input("ENTER 1 TO CANCEL YOUR ORDER ELSE PRESS 0 :"))
-    if confirm_cancellation == 1:
-        order.clear()
-        bill.clear()
-    elif confirm_cancellation == 0:
-        return
-    else:
-        print('INVALID OPTION')
+        print(f"Order ID {orderid} not found in the order. Please add it first.")
 
 
 
 def save_to_excel():
-    # Create a DataFrame with the order details
-    order_df = pd.DataFrame({
-                            #  'CUSTOMER NAME': [cus_name]*len(order),
-                             'CAKE': list(order.keys()),
-                             'QUANTITY': list(order.values()),
-                             'COST PER CAKE': [menu[cake] for cake in order.keys()],
-                             'TOTAL COST': list(bill.values())})
-                            #  'DATE': [current_date]*len(order)})
+    cursor.execute("SELECT * FROM cust_bill")
+    cust_bill = cursor.fetchall()
+
+    if not cust_bill:
+        print('NO ORDERS FOUND.')
+        return
+    
+    order_df = pd.DataFrame(cust_bill, columns=['order_id', 'customer_name', 'cake', 'quantity', 'cost_per_cake', 'sum_of_each_cake', 'order_date'])
 
     # Save the DataFrame to an Excel file
     file_name = input("Enter the Excel file name to save (without extension): ")
@@ -224,14 +297,13 @@ def save_to_excel():
     print(f"Order details saved to {file_path}")
 
 
-
-
-# menu = {'Classic Chocolate Cake':30,'Vanilla Bean Celebration Cake':40,'Red Velvet Delight':45,'Lemon Blueberry Bliss':35,'Cookies and Cream Dream Cake':35}
-menu = {'a':30,'b':40,'c':45,'d':35,'e':35}
+menu = {'Classic_Chocolate':30,'Vanilla':40,'Red_Velvet':45,'Bliss':35,'Cookies':35}
+# menu = {'a':30,'b':40,'c':45,'d':35,'e':35}
 bill = {}
 order = {}
 print("MENU : ",menu)
-cus_name = input('ENTER CUSTOMER NAME: ')
+# cus_name = ''
+# cus_name = input('ENTER CUSTOMER NAME: ')
 
 while True:
     print('1. ADD ORDERS')
@@ -245,7 +317,6 @@ while True:
     if options == 1:
         add_orders()
     elif options == 2:
-        # view_orders()
         view_orders_from_database()
     elif options == 3:
         get_order_by_id()
@@ -259,4 +330,3 @@ while True:
         exit()
     else:
         print('ENTER VALID OPTIONS')
-
