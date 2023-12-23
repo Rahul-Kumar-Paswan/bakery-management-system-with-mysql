@@ -3,13 +3,21 @@ import datetime
 import mysql.connector
 from prettytable import PrettyTable
 
-
+#  lenovo
+# db = mysql.connector.connect (
+#     host = 'localhost',
+#     user = 'root',
+#     password  = 'Rahul@123',
+#     database = 'my_db',
+#     port = '3307'
+# )
+# acer
 db = mysql.connector.connect (
     host = 'localhost',
-    user = 'root',
+    user = 'rahul',
     password  = 'Rahul@123',
     database = 'my_db',
-    port = '3307'
+    port = '3306'
 )
 cursor = db.cursor()
 
